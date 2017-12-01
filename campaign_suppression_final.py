@@ -1900,6 +1900,11 @@ print("------------Final file will be split by campaign id and written directly 
 ### removing cols not required in output
 col_final_ls = [col for col in final_result_moduleCount.columns if col.find("authrealm")<0]
 
+### removing columns which will be moved to modules table
+col_modules = ["ModuleCount","LaunchDateTimeUTC","Locale","TPID","EAPID","LANG_ID","IsMER"]
+col_final_ls=[c for c in col_final_ls if c not in col_modules]
+
+
 df_split = (module_count_map.select("campaign_id","AudienceTableName","ModuleCount").distinct()).join(broadcast(OM),"campaign_id","inner")
 df_split.show(100, False)
 
@@ -1952,6 +1957,10 @@ for i in cid:
 	
 	df_write = final_result_moduleCount.select(col_final_ls).filter("campaign_id = {}".format(i))
 	df_write.cache()
+	
+	### Creating a data frame containing details from the alpha output to be moved to modules table
+	df_write_modules = final_result_moduleCount.filter("campaign_id = {}".format(i)).select(col_modules).distinct()
+	
 	num_rows = df_write.count()
 	print("#records:", num_rows)
 	
@@ -1991,6 +2000,11 @@ for i in cid:
 		flat_list = [item for sublist in mod_ls for item in sublist]
 		dist_mod_list = list(set(flat_list))
 		dis_mod = sqlContext.createDataFrame(pd.DataFrame(dist_mod_list)).withColumnRenamed("0","modules")
+		
+		### Appending columns not requied in the final alpha output to the modules table
+		df_write_modules=df_write_modules.withColumn("join_id",lit(1))
+		dis_mod=dis_mod.withColumn("join_id",lit(1)).join(df_write_modules,"join_id",'left').drop("join_id")
+		
 		dis_mod.show()
 		(dis_mod.coalesce(1).write.mode("overwrite").parquet(path_mod))
 		log_df_update(sqlContext,1,'Writing distinct modules for CID{} to s3 is Done'.format(i),get_pst_date(),' ',str(dis_mod.count()),StartDate,path,AlphaProcessDetailsLog_str)
